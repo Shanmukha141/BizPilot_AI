@@ -1,0 +1,26 @@
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Python
+_pycache_/
+*.py[cod]
+
+# Vector database
+vector_db/
+
+# PDFs used for testing
+data/*.pdf
+
+# Logs
+*.log
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
