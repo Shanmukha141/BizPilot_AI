@@ -6,8 +6,9 @@ venv/
 .env
 
 # Python
-_pycache_/
+__pycache__/
 *.py[cod]
+.pytest_cache/
 
 # Vector database
 vector_db/
@@ -24,3 +25,10 @@ data/*.pdf
 # OS files
 .DS_Store
 Thumbs.db
+
+# Scratch files
+backend/response.json
+backend/test.py
+backend/test2.py
+backend/test_api_key.py
+backend/test_import.py

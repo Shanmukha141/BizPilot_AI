@@ -63,6 +63,7 @@ def chat_endpoint():
         
         try:
             for event in events:
+                print(f"RAW EVENT: {event}")
                 # Safely check for and print tool calls based on the ADK Event structure
                 if getattr(event, 'content', None) and getattr(event.content, 'parts', None):
                     for part in event.content.parts:
