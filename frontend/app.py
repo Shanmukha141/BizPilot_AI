@@ -1,42 +1,142 @@
 import streamlit as st
-import requests
 import uuid
 import pandas as pd
+import os
+import sys
 
-# Configuration
-FLASK_BACKEND_URL = "http://127.0.0.1:5000/api/chat"
+# --- FIX FOR CIRCULAR IMPORT ---
+# Remove 'frontend' from sys.path so that this app.py doesn't shadow the 'app' module in the backend
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir in sys.path:
+    sys.path.remove(script_dir)
 
-st.set_page_config(page_title="BizPilot AI - Dashboard", page_icon="👔", layout="wide")
+# Add 'backend' to sys.path so that Python can find the backend's 'app' package
+BACKEND_DIR = os.path.abspath(os.path.join(script_dir, '..', 'backend'))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
-# 1. Sidebar Navigation
-st.sidebar.title("BizPilot AI Engine")
+from google.adk import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+# 1. IMPORT YOUR BACKEND LOGIC DIRECTLY
+# Now we can import directly from 'app' since 'backend' is in our path!
+from app.agents.supervisor import core_workflow
+from app.tools.rag_tool import ingest_pdf, get_all_documents
+
+# Ensure data dir exists (for uploads)
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'backend', 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 2. INITIALIZE THE RUNNER ONCE
+@st.cache_resource
+def get_runner():
+    # In monolith mode, Streamlit directly instantiates the ADK runner
+    return Runner(
+        node=core_workflow, 
+        app_name="BizPilot_Monolith",
+        session_service=InMemorySessionService(),
+        auto_create_session=True
+    )
+
+runner = get_runner()
+
+# 3. CREATE THE LOCAL CHAT HANDLER
+def handle_chat(user_message: str, session_id: str) -> str:
+    """Runs the multi-agent ADK graph directly within Streamlit."""
+    new_message = types.Content(role="user", parts=[types.Part(text=user_message)])
+    events = runner.run(
+        user_id="streamlit_user",
+        session_id=session_id,
+        new_message=new_message
+    )
+    
+    response_text = ""
+    for event in events:
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                if part.text:
+                    response_text += part.text
+    return response_text
+
+st.set_page_config(page_title="BizPilot AI", page_icon="✨", layout="wide")
+
+# --- Custom CSS for clean UI ---
+st.markdown("""
+<style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    /* Only constrain width on chat page */
+    .stChatFloatingInputContainer {
+        padding-bottom: 2rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize global session tracking
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "Hello! I am BizPilot AI. How can I assist you with your business operations today?"}]
+if "uploaded_docs" not in st.session_state:
+    st.session_state.uploaded_docs = []
+
+# --- SIDEBAR NAVIGATION ---
+st.sidebar.title("✨ BizPilot AI Engine")
 st.sidebar.caption("Autonomous Business Operations Copilot")
 st.sidebar.markdown("---")
+
 page = st.sidebar.radio(
     "Navigation", 
     ["💬 Main Assistant Chat", "📁 Uploaded Files", "📊 Business Analytics", "📋 Operations Reports", "🤖 Agent Status"]
 )
 
-# Initialize global session tracking for memory
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "uploaded_docs" not in st.session_state:
-    st.session_state.uploaded_docs = ["sample_policy.pdf"] # Pre-populated with your Phase 5 file
+st.sidebar.markdown("---")
+st.sidebar.subheader("Quick Upload")
+st.sidebar.caption("Upload business documents (PDFs) to give the AI context.")
+
+# File Uploader
+uploaded_file = st.sidebar.file_uploader("Upload PDF Document", type=["pdf"], label_visibility="collapsed")
+
+# Automatic Upload Logic (direct Python function calls now)
+if uploaded_file is not None:
+    if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != uploaded_file.name:
+        with st.sidebar:
+            with st.spinner(f"Uploading {uploaded_file.name}..."):
+                try:
+                    # Save the uploaded file to backend/data
+                    file_path = os.path.join(DATA_DIR, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getvalue())
+                    
+                    # Direct function call to ingest_pdf instead of requests.post
+                    ingest_pdf(file_path)
+                    
+                    st.success(f"✅ {uploaded_file.name} added to Vector DB!")
+                    st.session_state.last_uploaded = uploaded_file.name
+                    if uploaded_file.name not in st.session_state.uploaded_docs:
+                        st.session_state.uploaded_docs.append(uploaded_file.name)
+                except Exception as e:
+                    st.error(f"Upload failed: {str(e)}")
+    else:
+        st.sidebar.success(f"✅ {uploaded_file.name} is active.")
 
 # --- PAGE 1: CHAT INTERFACE ---
 if page == "💬 Main Assistant Chat":
     st.title("💬 BizPilot Operations Chat")
-    st.caption("Ask questions about math, dates, or search internal company records.")
     
+    # Optional button to clear chat
+    if st.button("Clear Conversation"):
+        st.session_state.messages = [{"role": "assistant", "content": "Conversation cleared. How can I help you?"}]
+        st.rerun()
+
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
     # User Input Loop
-    if prompt := st.chat_input("Ask BizPilot to calculate something, search files, or compile metrics..."):
+    if prompt := st.chat_input("Ask BizPilot to search documents, compile metrics, or analyze data..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -44,41 +144,53 @@ if page == "💬 Main Assistant Chat":
         with st.chat_message("assistant"):
             with st.spinner("Agent routing & processing..."):
                 try:
-                    payload = {
-                        "message": prompt,
-                        "session_id": st.session_state.session_id,
-                        "history": st.session_state.messages
-                    }
-                    response = requests.post(FLASK_BACKEND_URL, json=payload)
-                    response_data = response.json()
+                    # Restore the manual conversation history injection from the old Flask app
+                    final_prompt = prompt
+                    history = st.session_state.messages
+                    if len(history) > 1:
+                        context_string = "CONVERSATION HISTORY:\n"
+                        # Loop through everything EXCEPT the very last item (which is the current prompt)
+                        for msg in history[:-1]:
+                            role = "User" if msg["role"] == "user" else "Assistant"
+                            context_string += f"{role}: {msg['content']}\n"
+                        
+                        context_string += f"\nCURRENT REQUEST: {prompt}"
+                        final_prompt = context_string
 
-                    if response.status_code == 200:
-                        assistant_reply = response_data["response"]
-                        st.markdown(assistant_reply)
-                        st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
-                    else:
-                        st.error(f"Error: {response_data.get('error', 'Unknown error')}")
-                except requests.exceptions.ConnectionError:
-                    st.error("Connection Error: Is your Flask server running on port 5000?")
+                    # Append hint to prompt if documents are uploaded
+                    enhanced_prompt = final_prompt
+                    if st.session_state.uploaded_docs:
+                        enhanced_prompt += f"\n\n[SYSTEM HINT: The user has uploaded these documents: {', '.join(st.session_state.uploaded_docs)}. If they are asking about them, please use the search_business_documents tool to search them.]"
+
+                    # 4. SWAP FLASK REQUEST FOR DIRECT FUNCTION CALL
+                    assistant_reply = handle_chat(enhanced_prompt, st.session_state.session_id)
+                    
+                    if not assistant_reply or not assistant_reply.strip():
+                        assistant_reply = "⚠️ The agent returned no text. This might be due to an error or rate limiting."
+
+                    st.markdown(assistant_reply)
+                    st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
+                except Exception as e:
+                    st.error(f"Agent Execution Error: {str(e)}")
 
 # --- PAGE 2: UPLOADED FILES ---
 elif page == "📁 Uploaded Files":
     st.title("📁 Document Knowledge Base")
     st.caption("Manage business files and SOPs ingested into ChromaDB vector storage.")
     
-    uploaded_file = st.file_uploader("Ingest new business PDF document", type=["pdf"])
-    if uploaded_file is not None:
-        if st.button("Process & Embed Document"):
-            with st.spinner("Parsing text and calculating chunk embeddings..."):
-                # In Phase 12 we will wire this to a Flask '/api/upload' route.
-                # For now, append to local memory state to simulate system tracking.
-                if uploaded_file.name not in st.session_state.uploaded_docs:
-                    st.session_state.uploaded_docs.append(uploaded_file.name)
-                st.success(f"Successfully chunked and saved '{uploaded_file.name}' into vector database.")
-                
     st.markdown("### Currently Active Documents")
-    for doc in st.session_state.uploaded_docs:
-        st.info(f"📄 {doc} — *Status: Active in ChromaDB Index*")
+    
+    try:
+        with st.spinner("Fetching active documents..."):
+            # Direct call to get_all_documents instead of requests.get
+            docs = get_all_documents()
+            if not docs:
+                st.info("No documents uploaded yet. Use the Quick Upload in the sidebar.")
+            else:
+                for doc in docs:
+                    st.success(f"📄 {doc} — *Status: Active in ChromaDB Index*")
+    except Exception as e:
+        st.error(f"Error accessing database: {str(e)}")
 
 # --- PAGE 3: BUSINESS ANALYTICS ---
 elif page == "📊 Business Analytics":

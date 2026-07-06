@@ -35,11 +35,27 @@ def get_sales_insights(region: str) -> str:
     return f"Sales Insights for {region.title()}: {result}"
 
 # --- HR TOOLS ---
-def summarize_resume(candidate_name: str, resume_text: str) -> str:
-    """Summarizes a candidate's resume and highlights key strengths."""
-    # In a real app, this might do an internal LLM call or parse a PDF.
-    # For the tool layer, we instruct the agent to use this to structure the output.
-    return f"Candidate {candidate_name} summary: Strong background in backend development and API design based on provided text."
+def summarize_resume(candidate_name: str = "", document_name: str = None) -> str:
+    """Searches the uploaded documents for a candidate's resume and retrieves it for summarization. 
+    You MUST provide the document_name if you know it from the user's uploads."""
+    try:
+        from app.tools.rag_tool import collection
+        where_clause = {"source": document_name} if document_name else None
+        search_query = f"{candidate_name} resume" if candidate_name else "resume experience skills education"
+        
+        results = collection.query(
+            query_texts=[search_query],
+            n_results=3,
+            where=where_clause
+        )
+        
+        if not results['documents'][0]:
+            return f"No resume found in the uploaded documents."
+            
+        context = "\n\n".join(results['documents'][0])
+        return f"Here is the retrieved resume content:\n{context}\n\nPlease provide a summary highlighting their key strengths, experience, and extract their name if not provided."
+    except Exception as e:
+        return f"Error retrieving resume: {str(e)}"
 
 # --- EMAIL TOOL ---
 def draft_email(recipient: str, subject: str, core_message: str) -> str:

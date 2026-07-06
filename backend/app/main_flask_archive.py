@@ -12,6 +12,48 @@ CORS(app)
 # Persistent session service to maintain conversation history
 session_service = InMemorySessionService()
 
+import os
+from werkzeug.utils import secure_filename
+from app.tools.rag_tool import ingest_pdf
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+@app.route('/api/upload', methods=['POST'])
+def upload_endpoint():
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part"}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+        
+        if file and file.filename.endswith('.pdf'):
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(DATA_DIR, filename)
+            file.save(file_path)
+            
+            # Ingest and chunk the PDF
+            ingest_pdf(file_path)
+            
+            return jsonify({"status": "success", "message": f"Successfully uploaded and chunked {filename}"}), 200
+        else:
+            return jsonify({"error": "Only PDF files are supported"}), 400
+    except Exception as e:
+        print(f"UPLOAD ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+from app.tools.rag_tool import get_all_documents
+
+@app.route('/api/documents', methods=['GET'])
+def get_documents_endpoint():
+    try:
+        docs = get_all_documents()
+        return jsonify({"status": "success", "documents": docs}), 200
+    except Exception as e:
+        print(f"DOCUMENTS ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/chat', methods=['POST'])
 def chat_endpoint():
     try:

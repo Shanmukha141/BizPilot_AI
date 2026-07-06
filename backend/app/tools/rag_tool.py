@@ -44,13 +44,17 @@ def ingest_pdf(file_path: str):
     except Exception as e:
         print(f"Error ingesting PDF: {str(e)}")
 
-def search_business_documents(query: str) -> str:
-    """Searches the company documents (SOPs, contracts, HR policies) to answer questions."""
+def search_business_documents(query: str, document_name: str = None) -> str:
+    """Searches the company documents (SOPs, contracts, HR policies, resumes) to answer questions.
+    Provide document_name (e.g. 'John_Doe_Resume.pdf') if you want to restrict the search to a specific uploaded document.
+    """
     try:
+        where_clause = {"source": document_name} if document_name else None
         # The Retriever pulls the most relevant chunks based on the user's query
         results = collection.query(
             query_texts=[query],
-            n_results=3 # Fetch the top 3 most relevant chunks
+            n_results=3, # Fetch the top 3 most relevant chunks
+            where=where_clause
         )
         
         if not results['documents'][0]:
@@ -61,3 +65,17 @@ def search_business_documents(query: str) -> str:
         return f"Found the following information in the internal documents:\n{context}"
     except Exception as e:
         return f"Error searching documents: {str(e)}"
+
+def get_all_documents() -> list:
+    """Returns a list of unique document sources currently in the ChromaDB collection."""
+    try:
+        res = collection.get(include=['metadatas'])
+        metadatas = res.get('metadatas', [])
+        sources = set()
+        for m in metadatas:
+            if m and 'source' in m:
+                sources.add(m['source'])
+        return list(sources)
+    except Exception as e:
+        print(f"Error getting documents: {e}")
+        return []

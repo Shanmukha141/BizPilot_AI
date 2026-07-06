@@ -18,10 +18,10 @@ finance_agent = Agent(
 )
 
 # 2. Document & HR Agent
-hr_agent = Agent(
-    name="hr_agent",
+document_agent = Agent(
+    name="document_agent",
     model=settings.GEMINI_MODEL,
-    instruction="You are the HR Agent. You handle employee policies and recruitment summaries.",
+    instruction="You are the Document and HR Agent. You search the vector database for any uploaded business documents, contracts, SOPs, and general files to answer user queries. You also handle employee policies and recruitment summaries.",
     tools=[search_business_documents, summarize_resume]
 )
 

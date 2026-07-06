@@ -1,0 +1,7 @@
+google-adk[extensions]>=2.0.0
+google-genai>=0.1.0
+python-dotenv>=1.0.1
+streamlit>=1.32.0
+chromadb>=0.4.24
+PyPDF2>=3.0.1
+pandas>=2.0.0
